@@ -749,7 +749,8 @@
   const multiCount = document.getElementById("multiCount");
   const multiSizeSlider = document.getElementById("multiSizeSlider");
   const multiSizeVal = document.getElementById("multiSizeVal");
-  let multiBaseSizes = {}; // 複数選択時の「拡大縮小前の元サイズ」を文字IDごとに記録
+  let multiBaseTransforms = {}; // 複数選択時の「拡大縮小前」の各文字サイズ・位置と、選択範囲の中心
+  let multiScaleCenter = { x: 0, y: 0 };
 
   function getSelectedGlyph() {
     if (selectedIds.size !== 1) return null;
@@ -780,11 +781,16 @@
     multiControls.classList.add("show");
     multiCount.textContent = selectedIds.size;
 
-    // 選択し直すたびに、その時点の各文字サイズを「基準（100%）」として記録する。
-    // これにより、スライダーは常に「選択時点から何%変化したか」を表せる。
-    multiBaseSizes = {};
-    glyphs.filter(g => selectedIds.has(g.id)).forEach(g => {
-      multiBaseSizes[g.id] = g.size;
+    // 選択し直すたびに、その時点の各文字のサイズ・位置を「基準（100%）」として記録する。
+    // 選択範囲全体の中心を基準点とし、そこからの相対位置も保つことで、
+    // 拡大縮小したときに文字同士の間隔・配置バランスも一緒に拡大縮小される。
+    const selected = glyphs.filter(g => selectedIds.has(g.id));
+    multiScaleCenter.x = selected.reduce((s, g) => s + g.x, 0) / selected.length;
+    multiScaleCenter.y = selected.reduce((s, g) => s + g.y, 0) / selected.length;
+
+    multiBaseTransforms = {};
+    selected.forEach(g => {
+      multiBaseTransforms[g.id] = { size: g.size, x: g.x, y: g.y };
     });
     multiSizeSlider.value = 100;
     multiSizeVal.textContent = "100%";
@@ -916,7 +922,13 @@
         g.y = cy;
       }
       layoutGlyphEl(g);
+      // 並べ替えで位置が変わったので、拡大縮小スライダーの基準もここで取り直す
+      multiBaseTransforms[g.id] = { size: g.size, x: g.x, y: g.y };
     });
+    multiScaleCenter.x = cx;
+    multiScaleCenter.y = cy;
+    multiSizeSlider.value = 100;
+    multiSizeVal.textContent = "100%";
 
     const onlyG = getSelectedGlyph();
     if (onlyG) positionHandles(onlyG);
@@ -931,12 +943,17 @@
   });
 
   // ---------- 複数選択：一括拡大縮小 ----------
-  // 位置は変えず、選択時点のサイズ（multiBaseSizes）を基準に同じ倍率で拡大縮小する。
+  // 選択範囲全体の中心（multiScaleCenter）を基準に、各文字のサイズと、
+  // 中心からの相対位置の両方を同じ倍率で拡大縮小する。
+  // これにより文字同士の間隔も一緒に広がり、見た目の比率が保たれる。
   function applyMultiScale(percent) {
     const ratio = percent / 100;
     glyphs.filter(g => selectedIds.has(g.id)).forEach(g => {
-      const base = multiBaseSizes[g.id] != null ? multiBaseSizes[g.id] : g.size;
-      g.size = Math.max(10, base * ratio);
+      const base = multiBaseTransforms[g.id];
+      if (!base) return;
+      g.size = Math.max(10, base.size * ratio);
+      g.x = multiScaleCenter.x + (base.x - multiScaleCenter.x) * ratio;
+      g.y = multiScaleCenter.y + (base.y - multiScaleCenter.y) * ratio;
       layoutGlyphEl(g);
     });
     multiSizeVal.textContent = Math.round(percent) + "%";
@@ -966,7 +983,7 @@
     selected.forEach(g => {
       g.size = avg;
       layoutGlyphEl(g);
-      multiBaseSizes[g.id] = avg; // 拡大縮小スライダーの基準も更新
+      if (multiBaseTransforms[g.id]) multiBaseTransforms[g.id].size = avg; // 拡大縮小スライダーの基準も更新
     });
     multiSizeSlider.value = 100;
     multiSizeVal.textContent = "100%";
@@ -1006,6 +1023,15 @@
         layoutGlyphEl(g);
       });
     }
+
+    // 位置が変わったので、拡大縮小スライダーの基準を取り直す
+    multiScaleCenter.x = selected.reduce((s, g) => s + g.x, 0) / selected.length;
+    multiScaleCenter.y = selected.reduce((s, g) => s + g.y, 0) / selected.length;
+    selected.forEach(g => {
+      multiBaseTransforms[g.id] = { size: g.size, x: g.x, y: g.y };
+    });
+    multiSizeSlider.value = 100;
+    multiSizeVal.textContent = "100%";
   });
 
   document.getElementById("multiClearBtn").addEventListener("click", () => {
