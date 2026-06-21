@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>文字配置エディタ</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@400;500;700&family=Noto+Sans+JP:wght@700;900&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@400;500;700&family=Noto+Sans+JP:wght@400;700;900&family=Noto+Serif+JP:wght@400;600;700&family=Zen+Maru+Gothic:wght@400;700;900&family=Zen+Kaku+Gothic+New:wght@400;700;900&display=swap');
 
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body {
@@ -208,6 +208,24 @@
   }
   .palette-chip.active { border-color: #C9B98A; }
 
+  /* フォントチップ */
+  .font-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .font-chip {
+    font-size: 13px;
+    letter-spacing: 0.04em;
+    color: #EDE7D9;
+    background: #1E1B14;
+    border: 1px solid rgba(237,231,217,0.2);
+    border-radius: 4px;
+    padding: 9px 14px;
+    cursor: pointer;
+  }
+  .font-chip.active {
+    border-color: #C9B98A;
+    background: #262112;
+    color: #C9B98A;
+  }
+
   .actions { display: flex; gap: 10px; margin-top: 4px; }
   .btn {
     flex: 1;
@@ -302,6 +320,11 @@
       </div>
 
       <div class="field">
+        <label>フォント</label>
+        <div class="font-row" id="fontRow"></div>
+      </div>
+
+      <div class="field">
         <label>使い方</label>
         <div class="hint-box">
           <b>ドラッグ</b>＝移動　<b>赤丸</b>＝拡大縮小　<b>緑丸</b>＝回転<br>
@@ -384,6 +407,45 @@
     });
   }
 
+  // ---------- フォントUI ----------
+  // 源ノ角ゴシック相当（Noto Sans JP）、源ノ明朝相当（Noto Serif JP）、
+  // 筑紫系の雰囲気に近い丸ゴシック・角ゴシック（Zen Maru / Zen Kaku）を用意。
+  // 厳密に同じ商用フォントではないため、名前は系統がわかる表記にしている。
+  const FONTS = [
+    { name: "筆書き明朝", family: "'Shippori Mincho', serif", weight: 700 },
+    { name: "ゴシック", family: "'Noto Sans JP', sans-serif", weight: 900 },
+    { name: "明朝", family: "'Noto Serif JP', serif", weight: 700 },
+    { name: "丸ゴシック", family: "'Zen Maru Gothic', sans-serif", weight: 700 },
+    { name: "角ゴシック", family: "'Zen Kaku Gothic New', sans-serif", weight: 700 }
+  ];
+  let currentFontIdx = 0;
+
+  const fontRow = document.getElementById("fontRow");
+  FONTS.forEach((f, idx) => {
+    const chip = document.createElement("div");
+    chip.className = "font-chip" + (idx === 0 ? " active" : "");
+    chip.textContent = f.name;
+    chip.style.fontFamily = f.family;
+    chip.addEventListener("click", () => {
+      currentFontIdx = idx;
+      document.querySelectorAll(".font-chip").forEach(c => c.classList.remove("active"));
+      chip.classList.add("active");
+      applyFont();
+    });
+    fontRow.appendChild(chip);
+  });
+
+  function applyFont() {
+    const f = FONTS[currentFontIdx];
+    glyphs.forEach(g => {
+      const el = document.getElementById("g-" + g.id);
+      if (el) {
+        el.style.fontFamily = f.family;
+        el.style.fontWeight = f.weight;
+      }
+    });
+  }
+
   // ---------- 文字の初期化 ----------
   function buildGlyphsFromText(text) {
     stage.querySelectorAll(".glyph").forEach(el => el.remove());
@@ -415,6 +477,7 @@
       createGlyphEl(g);
     });
     applyPalette();
+    applyFont();
   }
 
   function createGlyphEl(g) {
@@ -1065,6 +1128,7 @@
     canvas.height = STAGE_H;
     const ctx = canvas.getContext("2d");
     const pal = PALETTES[currentPalette];
+    const fontDef = FONTS[currentFontIdx];
 
     ctx.fillStyle = pal.bg;
     ctx.fillRect(0, 0, STAGE_W, STAGE_H);
@@ -1076,7 +1140,7 @@
       ctx.translate(g.x, g.y);
       ctx.rotate(g.rot * Math.PI / 180);
       ctx.fillStyle = pal.fg;
-      ctx.font = `700 ${g.size}px 'Shippori Mincho', serif`;
+      ctx.font = `${fontDef.weight} ${g.size}px ${fontDef.family}`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       // 縦書きの場合は簡易的に文字を90度回転させずそのまま中央配置（1文字なので見た目は同じ）
