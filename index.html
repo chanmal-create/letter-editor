@@ -259,6 +259,13 @@
 
       <div class="multi-controls" id="multiControls">
         <div class="row-title">複数選択中（<span id="multiCount">0</span>文字）</div>
+        <div class="slider-row">
+          <span>大きさ</span>
+          <button class="mini-btn" id="multiSizeDownBtn" style="flex: 0 0 36px; padding: 6px 0;">−</button>
+          <input type="range" id="multiSizeSlider" min="20" max="300" value="100">
+          <button class="mini-btn" id="multiSizeUpBtn" style="flex: 0 0 36px; padding: 6px 0;">＋</button>
+          <span class="val" id="multiSizeVal">100%</span>
+        </div>
         <div class="multi-grid">
           <button class="mini-btn" id="multiVerticalBtn">選択を縦書きに</button>
           <button class="mini-btn" id="multiHorizontalBtn">選択を横書きに</button>
@@ -740,6 +747,9 @@
   const rotVal = document.getElementById("rotVal");
   const multiControls = document.getElementById("multiControls");
   const multiCount = document.getElementById("multiCount");
+  const multiSizeSlider = document.getElementById("multiSizeSlider");
+  const multiSizeVal = document.getElementById("multiSizeVal");
+  let multiBaseSizes = {}; // 複数選択時の「拡大縮小前の元サイズ」を文字IDごとに記録
 
   function getSelectedGlyph() {
     if (selectedIds.size !== 1) return null;
@@ -769,6 +779,15 @@
     selectedControls.classList.remove("show");
     multiControls.classList.add("show");
     multiCount.textContent = selectedIds.size;
+
+    // 選択し直すたびに、その時点の各文字サイズを「基準（100%）」として記録する。
+    // これにより、スライダーは常に「選択時点から何%変化したか」を表せる。
+    multiBaseSizes = {};
+    glyphs.filter(g => selectedIds.has(g.id)).forEach(g => {
+      multiBaseSizes[g.id] = g.size;
+    });
+    multiSizeSlider.value = 100;
+    multiSizeVal.textContent = "100%";
   }
 
   function syncSliderFromGlyph(g) {
@@ -911,6 +930,34 @@
     rearrangeSelected(false);
   });
 
+  // ---------- 複数選択：一括拡大縮小 ----------
+  // 位置は変えず、選択時点のサイズ（multiBaseSizes）を基準に同じ倍率で拡大縮小する。
+  function applyMultiScale(percent) {
+    const ratio = percent / 100;
+    glyphs.filter(g => selectedIds.has(g.id)).forEach(g => {
+      const base = multiBaseSizes[g.id] != null ? multiBaseSizes[g.id] : g.size;
+      g.size = Math.max(10, base * ratio);
+      layoutGlyphEl(g);
+    });
+    multiSizeVal.textContent = Math.round(percent) + "%";
+  }
+
+  multiSizeSlider.addEventListener("input", () => {
+    applyMultiScale(parseFloat(multiSizeSlider.value));
+  });
+
+  document.getElementById("multiSizeUpBtn").addEventListener("click", () => {
+    const next = Math.min(300, parseFloat(multiSizeSlider.value) + 10);
+    multiSizeSlider.value = next;
+    applyMultiScale(next);
+  });
+
+  document.getElementById("multiSizeDownBtn").addEventListener("click", () => {
+    const next = Math.max(20, parseFloat(multiSizeSlider.value) - 10);
+    multiSizeSlider.value = next;
+    applyMultiScale(next);
+  });
+
   document.getElementById("multiSameSizeBtn").addEventListener("click", () => {
     const selected = glyphs.filter(g => selectedIds.has(g.id));
     if (!selected.length) return;
@@ -919,7 +966,10 @@
     selected.forEach(g => {
       g.size = avg;
       layoutGlyphEl(g);
+      multiBaseSizes[g.id] = avg; // 拡大縮小スライダーの基準も更新
     });
+    multiSizeSlider.value = 100;
+    multiSizeVal.textContent = "100%";
   });
 
   document.getElementById("multiEvenGapBtn").addEventListener("click", () => {
