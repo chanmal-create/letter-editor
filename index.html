@@ -861,18 +861,54 @@
   });
 
   // ---------- 複数選択：一括操作 ----------
-  document.getElementById("multiVerticalBtn").addEventListener("click", () => {
-    glyphs.filter(g => selectedIds.has(g.id)).forEach(g => {
-      g.vertical = true;
+  // 選択中の文字を縦一列／横一列に並べ替える。
+  // 元の並び順（左上から右下への視覚的な並び）を保つことで、
+  // 「言葉を」のように複数文字をまとめて選んだときに文字順が崩れないようにする。
+  function sortGlyphsByReadingOrder(list) {
+    return [...list].sort((a, b) => {
+      const rowDiff = a.y - b.y;
+      if (Math.abs(rowDiff) > Math.max(a.size, b.size) * 0.5) return rowDiff;
+      return a.x - b.x;
+    });
+  }
+
+  function rearrangeSelected(vertical) {
+    const selected = glyphs.filter(g => selectedIds.has(g.id));
+    if (!selected.length) return;
+    const sorted = sortGlyphsByReadingOrder(selected);
+
+    // 選択範囲の中心を基準にして並べ替える
+    const cx = selected.reduce((s, g) => s + g.x, 0) / selected.length;
+    const cy = selected.reduce((s, g) => s + g.y, 0) / selected.length;
+
+    // 文字サイズの平均を間隔の基準にする（バラバラなサイズでも詰まりすぎないように）
+    const avgSize = selected.reduce((s, g) => s + g.size, 0) / selected.length;
+    const step = avgSize * 1.05;
+    const totalLen = step * (sorted.length - 1);
+    const start = -totalLen / 2;
+
+    sorted.forEach((g, i) => {
+      g.vertical = vertical;
+      if (vertical) {
+        g.x = cx;
+        g.y = cy + start + i * step;
+      } else {
+        g.x = cx + start + i * step;
+        g.y = cy;
+      }
       layoutGlyphEl(g);
     });
+
+    const onlyG = getSelectedGlyph();
+    if (onlyG) positionHandles(onlyG);
+  }
+
+  document.getElementById("multiVerticalBtn").addEventListener("click", () => {
+    rearrangeSelected(true);
   });
 
   document.getElementById("multiHorizontalBtn").addEventListener("click", () => {
-    glyphs.filter(g => selectedIds.has(g.id)).forEach(g => {
-      g.vertical = false;
-      layoutGlyphEl(g);
-    });
+    rearrangeSelected(false);
   });
 
   document.getElementById("multiSameSizeBtn").addEventListener("click", () => {
