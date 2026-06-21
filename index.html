@@ -1,0 +1,992 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>文字配置エディタ</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@400;500;700&family=Noto+Sans+JP:wght@700;900&display=swap');
+
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0;
+    background: #16140F;
+    color: #EDE7D9;
+    font-family: 'Noto Sans JP', sans-serif;
+    overscroll-behavior: none;
+  }
+
+  .app { display: flex; flex-direction: column; min-height: 100vh; }
+
+  header {
+    padding: 16px 20px 12px;
+    border-bottom: 1px solid rgba(237,231,217,0.12);
+  }
+  header h1 { margin: 0; font-size: 14px; letter-spacing: 0.15em; color: #C9B98A; font-weight: 700; }
+  header p { margin: 4px 0 0; font-size: 11px; color: rgba(237,231,217,0.45); }
+
+  .body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 16px;
+  }
+
+  /* ---------- ステージ ---------- */
+  .stage-shell { width: 100%; max-width: 760px; margin: 0 auto; }
+
+  .stage-outer {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1280 / 670;
+    border-radius: 3px;
+    overflow: hidden;
+    box-shadow: 0 20px 50px -25px rgba(0,0,0,0.7), 0 0 0 1px rgba(237,231,217,0.08);
+  }
+
+  /* 内側は常に1280x670の論理サイズを保ち、CSS transformで見た目だけ縮小する。
+     これにより、JS側の座標計算は常に1280x670基準で統一でき、
+     実画面サイズとのズレによる配置バグを防げる。 */
+  .stage {
+    position: absolute;
+    top: 0; left: 0;
+    width: 1280px;
+    height: 670px;
+    background: #F4EFE3;
+    transform-origin: top left;
+    touch-action: none;
+    user-select: none;
+  }
+
+  .glyph {
+    position: absolute;
+    top: 0; left: 0;
+    font-family: 'Shippori Mincho', serif;
+    font-weight: 700;
+    color: #221F1B;
+    line-height: 1;
+    white-space: nowrap;
+    will-change: transform;
+    cursor: grab;
+    transform-origin: center center;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .glyph.selected {
+    outline: 1.5px dashed rgba(138,46,46,0.7);
+    outline-offset: 6px;
+  }
+  .glyph.multi-selected {
+    outline: 1.5px dashed rgba(60,82,70,0.8);
+    outline-offset: 6px;
+  }
+  .glyph:active { cursor: grabbing; }
+
+  .selection-box {
+    position: absolute;
+    border: 1px dashed rgba(138,46,46,0.85);
+    background: rgba(138,46,46,0.08);
+    pointer-events: none;
+    z-index: 80;
+    display: none;
+  }
+
+  .handle {
+    position: absolute;
+    width: 18px; height: 18px;
+    background: #8A2E2E;
+    border: 2px solid #F4EFE3;
+    border-radius: 50%;
+    z-index: 50;
+    touch-action: none;
+  }
+  .handle.scale { cursor: nwse-resize; }
+  .handle.rotate {
+    cursor: grab;
+    background: #3C5246;
+  }
+
+  .dims { text-align: center; font-size: 10px; letter-spacing: 0.12em; color: rgba(237,231,217,0.35); margin-top: 8px; }
+
+  /* ---------- パネル ---------- */
+  .panel { max-width: 760px; margin: 0 auto; width: 100%; }
+
+  .field { margin-bottom: 16px; }
+  .field label {
+    display: block; font-size: 11px; letter-spacing: 0.1em;
+    color: rgba(237,231,217,0.55); margin-bottom: 8px;
+  }
+
+  textarea#textInput {
+    width: 100%;
+    background: #1E1B14;
+    border: 1px solid rgba(237,231,217,0.18);
+    border-radius: 3px;
+    color: #EDE7D9;
+    font-size: 16px;
+    padding: 12px;
+    resize: vertical;
+    min-height: 48px;
+    font-family: inherit;
+  }
+  textarea#textInput:focus { outline: none; border-color: #C9B98A; }
+
+  .hint-box {
+    font-size: 12px;
+    line-height: 1.7;
+    color: rgba(237,231,217,0.55);
+    background: #1E1B14;
+    border: 1px solid rgba(237,231,217,0.1);
+    border-radius: 4px;
+    padding: 12px 14px;
+  }
+  .hint-box b { color: #C9B98A; }
+
+  .selected-controls {
+    display: none;
+    background: #1E1B14;
+    border: 1px solid rgba(201,185,138,0.3);
+    border-radius: 4px;
+    padding: 14px;
+    margin-bottom: 16px;
+  }
+  .selected-controls.show { display: block; }
+  .selected-controls .row-title {
+    font-size: 12px;
+    color: #C9B98A;
+    letter-spacing: 0.1em;
+    margin-bottom: 10px;
+  }
+  .multi-controls {
+    display: none;
+    background: #1E1B14;
+    border: 1px solid rgba(60,82,70,0.5);
+    border-radius: 4px;
+    padding: 14px;
+    margin-bottom: 16px;
+  }
+  .multi-controls.show { display: block; }
+  .multi-controls .row-title {
+    font-size: 12px;
+    color: #8FB39C;
+    letter-spacing: 0.1em;
+    margin-bottom: 10px;
+  }
+  .multi-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+  .slider-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .slider-row span:first-child { font-size: 11px; width: 56px; color: rgba(237,231,217,0.6); flex-shrink: 0; }
+  .slider-row input[type="range"] { flex: 1; }
+  .slider-row .val { font-size: 11px; width: 40px; text-align: right; color: rgba(237,231,217,0.5); flex-shrink: 0; }
+
+  .mini-actions { display: flex; gap: 8px; margin-top: 10px; }
+  .mini-btn {
+    flex: 1;
+    font-family: inherit;
+    font-size: 11px;
+    padding: 8px 0;
+    border-radius: 3px;
+    cursor: pointer;
+    border: 1px solid rgba(237,231,217,0.25);
+    background: transparent;
+    color: #EDE7D9;
+    letter-spacing: 0.05em;
+  }
+  .mini-btn:active { transform: translateY(1px); }
+
+  /* 配色チップ */
+  .palette-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .palette-chip {
+    width: 30px; height: 30px;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    cursor: pointer;
+  }
+  .palette-chip.active { border-color: #C9B98A; }
+
+  .actions { display: flex; gap: 10px; margin-top: 4px; }
+  .btn {
+    flex: 1;
+    font-family: inherit;
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    padding: 13px 0;
+    border-radius: 3px;
+    cursor: pointer;
+    border: 1px solid rgba(237,231,217,0.25);
+    background: transparent;
+    color: #EDE7D9;
+  }
+  .btn:active { transform: translateY(1px); }
+  .btn.primary { background: #C9B98A; color: #16140F; border-color: #C9B98A; font-weight: bold; }
+
+  @media (min-width: 900px) {
+    .body { flex-direction: row; align-items: flex-start; }
+    .stage-shell { flex: 1.4; position: sticky; top: 16px; }
+    .panel { flex: 1; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header>
+    <h1>文字配置エディタ</h1>
+    <p>文字をドラッグで移動・隅をドラッグで拡大縮小・緑ハンドルで回転・ダブルクリックで縦横切替</p>
+  </header>
+
+  <div class="body">
+
+    <div class="stage-shell">
+      <div class="stage-outer" id="stageOuter">
+        <div class="stage" id="stage">
+          <div class="selection-box" id="selectionBox"></div>
+        </div>
+      </div>
+      <div class="dims">1280 × 670 px の比率 / クリック&ドラッグで配置を作り込めます</div>
+    </div>
+
+    <div class="panel">
+
+      <div class="field">
+        <label>文字を入力（変更すると配置はリセットされます）</label>
+        <textarea id="textInput" maxlength="30">言葉を、デザインする。</textarea>
+      </div>
+
+      <div class="multi-controls" id="multiControls">
+        <div class="row-title">複数選択中（<span id="multiCount">0</span>文字）</div>
+        <div class="multi-grid">
+          <button class="mini-btn" id="multiVerticalBtn">選択を縦書きに</button>
+          <button class="mini-btn" id="multiHorizontalBtn">選択を横書きに</button>
+          <button class="mini-btn" id="multiSameSizeBtn">サイズを揃える</button>
+          <button class="mini-btn" id="multiEvenGapBtn">間隔を揃える</button>
+        </div>
+        <div class="mini-actions">
+          <button class="mini-btn" id="multiClearBtn">選択を解除</button>
+        </div>
+      </div>
+
+      <div class="selected-controls" id="selectedControls">
+        <div class="row-title">選択中の文字「<span id="selChar"></span>」</div>
+        <div class="slider-row">
+          <span>大きさ</span>
+          <input type="range" id="sizeSlider" min="20" max="400" value="80">
+          <span class="val" id="sizeVal">80</span>
+        </div>
+        <div class="slider-row">
+          <span>回転</span>
+          <input type="range" id="rotSlider" min="-180" max="180" value="0">
+          <span class="val" id="rotVal">0°</span>
+        </div>
+        <div class="mini-actions">
+          <button class="mini-btn" id="orientToggleBtn">縦横切替</button>
+          <button class="mini-btn" id="frontBtn">前面へ</button>
+          <button class="mini-btn" id="resetCharBtn">この文字をリセット</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>配色</label>
+        <div class="palette-row" id="paletteRow"></div>
+      </div>
+
+      <div class="field">
+        <label>使い方</label>
+        <div class="hint-box">
+          <b>ドラッグ</b>＝移動　<b>赤丸</b>＝拡大縮小　<b>緑丸</b>＝回転<br>
+          <b>ダブルクリック / ダブルタップ</b>＝その文字だけ縦横切替<br>
+          <b>Shift+クリック</b>＝複数選択に追加　<b>空白からドラッグ</b>＝範囲選択<br>
+          文字以外の場所をクリックすると選択解除
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="btn" id="autoArrangeBtn">自動で並べ直す</button>
+        <button class="btn" id="shuffleBtn">ランダムに散らす</button>
+        <button class="btn primary" id="downloadBtn">PNGを書き出す</button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  const STAGE_W = 1280, STAGE_H = 670;
+  const stage = document.getElementById("stage");
+  const textInput = document.getElementById("textInput");
+
+  const PALETTES = [
+    { bg: "#F4EFE3", fg: "#221F1B" },
+    { bg: "#16140F", fg: "#EDE7D9" },
+    { bg: "#0B0B12", fg: "#5CF0E0" },
+    { bg: "#E8DEC8", fg: "#3A2E22" },
+    { bg: "#1A2A22", fg: "#E8DEC8" }
+  ];
+  let currentPalette = 0;
+
+  let glyphs = [];     // {id, ch, x, y, size, rot, vertical, z}
+  let nextId = 1;
+  let nextZ = 1;
+  let selectedIds = new Set(); // 複数選択に対応するためSetで管理
+
+  // ---------- スケール換算（実画面px ⇄ ステージ座標1280x670） ----------
+  const stageOuter = document.getElementById("stageOuter");
+
+  function applyStageScale() {
+    const outerRect = stageOuter.getBoundingClientRect();
+    const scale = outerRect.width / STAGE_W;
+    stage.style.transform = `scale(${scale})`;
+  }
+
+  function getScale() {
+    const outerRect = stageOuter.getBoundingClientRect();
+    return outerRect.width / STAGE_W;
+  }
+  function getStageRect() {
+    return stage.getBoundingClientRect();
+  }
+
+  // ---------- 配色UI ----------
+  const paletteRow = document.getElementById("paletteRow");
+  PALETTES.forEach((p, idx) => {
+    const chip = document.createElement("div");
+    chip.className = "palette-chip" + (idx === 0 ? " active" : "");
+    chip.style.background = `linear-gradient(135deg, ${p.bg} 50%, ${p.fg} 50%)`;
+    chip.addEventListener("click", () => {
+      currentPalette = idx;
+      document.querySelectorAll(".palette-chip").forEach(c => c.classList.remove("active"));
+      chip.classList.add("active");
+      applyPalette();
+    });
+    paletteRow.appendChild(chip);
+  });
+
+  function applyPalette() {
+    const p = PALETTES[currentPalette];
+    stage.style.background = p.bg;
+    glyphs.forEach(g => {
+      const el = document.getElementById("g-" + g.id);
+      if (el) el.style.color = p.fg;
+    });
+  }
+
+  // ---------- 文字の初期化 ----------
+  function buildGlyphsFromText(text) {
+    stage.querySelectorAll(".glyph").forEach(el => el.remove());
+    clearHandles();
+    glyphs = [];
+    selectedIds.clear();
+    updateSelectedPanel();
+
+    const chars = Array.from(text);
+    if (!chars.length) return;
+
+    const fontSize = Math.min(110, (STAGE_W * 0.82) / chars.length);
+    const totalWidth = chars.length * fontSize * 0.92;
+    let startX = (STAGE_W - totalWidth) / 2;
+    const baseY = STAGE_H / 2;
+
+    chars.forEach((ch, i) => {
+      const g = {
+        id: nextId++,
+        ch,
+        x: startX + i * fontSize * 0.92 + fontSize * 0.46,
+        y: baseY,
+        size: fontSize,
+        rot: 0,
+        vertical: false,
+        z: nextZ++
+      };
+      glyphs.push(g);
+      createGlyphEl(g);
+    });
+    applyPalette();
+  }
+
+  function createGlyphEl(g) {
+    const el = document.createElement("div");
+    el.className = "glyph";
+    el.id = "g-" + g.id;
+    el.textContent = g.ch;
+    stage.appendChild(el);
+    layoutGlyphEl(g);
+
+    el.addEventListener("pointerdown", (e) => onGlyphPointerDown(e, g));
+    el.addEventListener("dblclick", (e) => {
+      e.stopPropagation();
+      g.vertical = !g.vertical;
+      layoutGlyphEl(g);
+      if (selectedIds.size === 1 && selectedIds.has(g.id)) positionHandles(g);
+    });
+  }
+
+  function layoutGlyphEl(g) {
+    const el = document.getElementById("g-" + g.id);
+    if (!el) return;
+    el.style.fontSize = g.size + "px";
+    el.style.zIndex = g.z;
+    if (g.vertical) {
+      el.style.writingMode = "vertical-rl";
+      el.style.textOrientation = "upright";
+    } else {
+      el.style.writingMode = "horizontal-tb";
+      el.style.textOrientation = "mixed";
+    }
+    // 中心基準で配置：まずtransformなしの自然サイズを測ってから中心合わせ
+    el.style.transform = `translate(-50%, -50%) rotate(${g.rot}deg)`;
+    el.style.left = g.x + "px";
+    el.style.top = g.y + "px";
+  }
+
+  // ---------- 選択 ----------
+  function clearSelectionVisuals() {
+    selectedIds.forEach(id => {
+      const el = document.getElementById("g-" + id);
+      if (el) el.classList.remove("selected", "multi-selected");
+    });
+  }
+
+  function applySelectionVisuals() {
+    const ids = Array.from(selectedIds);
+    ids.forEach(id => {
+      const el = document.getElementById("g-" + id);
+      if (!el) return;
+      el.classList.remove("selected", "multi-selected");
+      el.classList.add(ids.length === 1 ? "selected" : "multi-selected");
+    });
+  }
+
+  // 単一選択：他の選択をすべて解除してこれだけを選ぶ
+  function selectGlyph(g) {
+    clearSelectionVisuals();
+    selectedIds.clear();
+    clearHandles();
+    if (g) {
+      selectedIds.add(g.id);
+      g.z = nextZ++;
+      document.getElementById("g-" + g.id).style.zIndex = g.z;
+      applySelectionVisuals();
+      createHandles(g);
+    }
+    updateSelectedPanel();
+  }
+
+  // Shift+クリック：選択トグル（複数選択を作る）
+  function toggleGlyphSelection(g) {
+    clearHandles();
+    if (selectedIds.has(g.id)) {
+      selectedIds.delete(g.id);
+    } else {
+      selectedIds.add(g.id);
+    }
+    applySelectionVisuals();
+    if (selectedIds.size === 1) {
+      const onlyId = Array.from(selectedIds)[0];
+      const onlyG = glyphs.find(x => x.id === onlyId);
+      if (onlyG) createHandles(onlyG);
+    }
+    updateSelectedPanel();
+  }
+
+  function clearAllSelection() {
+    clearSelectionVisuals();
+    selectedIds.clear();
+    clearHandles();
+    updateSelectedPanel();
+  }
+
+  const selectionBox = document.getElementById("selectionBox");
+
+  stage.addEventListener("pointerdown", (e) => {
+    if (e.target !== stage) return;
+
+    const scale = getScale();
+    const stageRect = stage.getBoundingClientRect();
+    const startX = (e.clientX - stageRect.left) / scale;
+    const startY = (e.clientY - stageRect.top) / scale;
+    const pointerId = e.pointerId;
+    let moved = false;
+
+    stage.setPointerCapture(pointerId);
+    selectionBox.style.display = "block";
+    selectionBox.style.left = startX + "px";
+    selectionBox.style.top = startY + "px";
+    selectionBox.style.width = "0px";
+    selectionBox.style.height = "0px";
+
+    function onMove(ev) {
+      const curX = (ev.clientX - stageRect.left) / scale;
+      const curY = (ev.clientY - stageRect.top) / scale;
+      const x = Math.min(startX, curX);
+      const y = Math.min(startY, curY);
+      const w = Math.abs(curX - startX);
+      const h = Math.abs(curY - startY);
+      if (w > 4 || h > 4) moved = true;
+      selectionBox.style.left = x + "px";
+      selectionBox.style.top = y + "px";
+      selectionBox.style.width = w + "px";
+      selectionBox.style.height = h + "px";
+    }
+
+    function onUp(ev) {
+      stage.releasePointerCapture(pointerId);
+      stage.removeEventListener("pointermove", onMove);
+      stage.removeEventListener("pointerup", onUp);
+      selectionBox.style.display = "none";
+
+      if (moved) {
+        // 範囲選択：矩形に重なる文字をすべて選択
+        const boxLeft = parseFloat(selectionBox.style.left);
+        const boxTop = parseFloat(selectionBox.style.top);
+        const boxW = parseFloat(selectionBox.style.width);
+        const boxH = parseFloat(selectionBox.style.height);
+
+        clearSelectionVisuals();
+        selectedIds.clear();
+        clearHandles();
+
+        glyphs.forEach(g => {
+          const half = g.size * 0.55;
+          const gLeft = g.x - half, gRight = g.x + half;
+          const gTop = g.y - half, gBottom = g.y + half;
+          const overlap = gLeft < boxLeft + boxW && gRight > boxLeft &&
+                           gTop < boxTop + boxH && gBottom > boxTop;
+          if (overlap) selectedIds.add(g.id);
+        });
+
+        applySelectionVisuals();
+        if (selectedIds.size === 1) {
+          const onlyG = glyphs.find(x => x.id === Array.from(selectedIds)[0]);
+          if (onlyG) createHandles(onlyG);
+        }
+        updateSelectedPanel();
+      } else {
+        // 単なる空白クリック：選択解除
+        clearAllSelection();
+      }
+    }
+
+    stage.addEventListener("pointermove", onMove);
+    stage.addEventListener("pointerup", onUp);
+  });
+
+  // ---------- ドラッグ移動 ----------
+  function onGlyphPointerDown(e, g) {
+    e.stopPropagation();
+    if (e.target.classList.contains("handle")) return;
+
+    if (e.shiftKey) {
+      toggleGlyphSelection(g);
+      // Shiftクリック直後は即ドラッグに入らない（選択操作のみ）
+      return;
+    }
+
+    // すでに複数選択の一部をクリックした場合はグループ全体をドラッグ、
+    // それ以外は単一選択に切り替える
+    if (!(selectedIds.size > 1 && selectedIds.has(g.id))) {
+      selectGlyph(g);
+    }
+
+    const isGroup = selectedIds.size > 1;
+    const groupGlyphs = isGroup ? glyphs.filter(x => selectedIds.has(x.id)) : [g];
+
+    const scale = getScale();
+    const startClientX = e.clientX, startClientY = e.clientY;
+    const startPositions = groupGlyphs.map(gl => ({ id: gl.id, x: gl.x, y: gl.y }));
+    const pointerId = e.pointerId;
+    const el = document.getElementById("g-" + g.id);
+    el.setPointerCapture(pointerId);
+
+    function onMove(ev) {
+      const dx = (ev.clientX - startClientX) / scale;
+      const dy = (ev.clientY - startClientY) / scale;
+      startPositions.forEach(sp => {
+        const gl = glyphs.find(x => x.id === sp.id);
+        if (!gl) return;
+        gl.x = sp.x + dx;
+        gl.y = sp.y + dy;
+        layoutGlyphEl(gl);
+      });
+      if (!isGroup && selectedIds.has(g.id) && selectedIds.size === 1) positionHandles(g);
+    }
+    function onUp() {
+      el.releasePointerCapture(pointerId);
+      el.removeEventListener("pointermove", onMove);
+      el.removeEventListener("pointerup", onUp);
+    }
+    el.addEventListener("pointermove", onMove);
+    el.addEventListener("pointerup", onUp);
+  }
+
+  // ---------- ハンドル（拡大縮小・回転） ----------
+  function createHandles(g) {
+    const scaleHandle = document.createElement("div");
+    scaleHandle.className = "handle scale";
+    scaleHandle.id = "handle-scale";
+    stage.appendChild(scaleHandle);
+
+    const rotHandle = document.createElement("div");
+    rotHandle.className = "handle rotate";
+    rotHandle.id = "handle-rotate";
+    stage.appendChild(rotHandle);
+
+    positionHandles(g);
+
+    scaleHandle.addEventListener("pointerdown", (e) => {
+      e.stopPropagation();
+      const scale = getScale();
+      const pointerId = e.pointerId;
+      scaleHandle.setPointerCapture(pointerId);
+      const startClientY = e.clientY;
+      const startSize = g.size;
+
+      function onMove(ev) {
+        const dy = (ev.clientY - startClientY) / scale;
+        g.size = Math.max(20, Math.min(420, startSize + dy * 1.6));
+        layoutGlyphEl(g);
+        positionHandles(g);
+        syncSliderFromGlyph(g);
+      }
+      function onUp() {
+        scaleHandle.releasePointerCapture(pointerId);
+        scaleHandle.removeEventListener("pointermove", onMove);
+        scaleHandle.removeEventListener("pointerup", onUp);
+      }
+      scaleHandle.addEventListener("pointermove", onMove);
+      scaleHandle.addEventListener("pointerup", onUp);
+    });
+
+    rotHandle.addEventListener("pointerdown", (e) => {
+      e.stopPropagation();
+      const pointerId = e.pointerId;
+      rotHandle.setPointerCapture(pointerId);
+
+      function onMove(ev) {
+        const rect = getStageRect();
+        const scale = getScale();
+        const cx = rect.left + g.x * scale;
+        const cy = rect.top + g.y * scale;
+        const angle = Math.atan2(ev.clientY - cy, ev.clientX - cx) * 180 / Math.PI;
+        g.rot = Math.round(angle + 90);
+        layoutGlyphEl(g);
+        positionHandles(g);
+        syncSliderFromGlyph(g);
+      }
+      function onUp() {
+        rotHandle.releasePointerCapture(pointerId);
+        rotHandle.removeEventListener("pointermove", onMove);
+        rotHandle.removeEventListener("pointerup", onUp);
+      }
+      rotHandle.addEventListener("pointermove", onMove);
+      rotHandle.addEventListener("pointerup", onUp);
+    });
+  }
+
+  function positionHandles(g) {
+    const scaleHandle = document.getElementById("handle-scale");
+    const rotHandle = document.getElementById("handle-rotate");
+    if (!scaleHandle || !rotHandle) return;
+
+    // ハンドルはstage要素の子であり、stageにCSS scale()がかかっているため、
+    // ここでは生のステージ座標系（1280x670基準）で位置を計算する。
+    // scaleを掛けるとstageのtransformと二重に縮小されてズレるため使わない。
+    const half = g.size * 0.55;
+    const rad = g.rot * Math.PI / 180;
+
+    // 右下（拡大縮小）
+    const sdx = half, sdy = half;
+    const srx = sdx * Math.cos(rad) - sdy * Math.sin(rad);
+    const sry = sdx * Math.sin(rad) + sdy * Math.cos(rad);
+
+    // 上（回転）
+    const rdx = 0, rdy = -half - 40;
+    const rrx = rdx * Math.cos(rad) - rdy * Math.sin(rad);
+    const rry = rdx * Math.sin(rad) + rdy * Math.cos(rad);
+
+    const cx = g.x, cy = g.y;
+    const handleSize = 18 / getScale(); // 画面上で常に同じ見た目サイズになるよう逆スケール
+
+    scaleHandle.style.width = handleSize + "px";
+    scaleHandle.style.height = handleSize + "px";
+    scaleHandle.style.left = (cx + srx - handleSize / 2) + "px";
+    scaleHandle.style.top = (cy + sry - handleSize / 2) + "px";
+
+    rotHandle.style.width = handleSize + "px";
+    rotHandle.style.height = handleSize + "px";
+    rotHandle.style.left = (cx + rrx - handleSize / 2) + "px";
+    rotHandle.style.top = (cy + rry - handleSize / 2) + "px";
+  }
+
+  function clearHandles() {
+    const a = document.getElementById("handle-scale");
+    const b = document.getElementById("handle-rotate");
+    if (a) a.remove();
+    if (b) b.remove();
+  }
+
+  // ---------- サイドパネル連動 ----------
+  const selectedControls = document.getElementById("selectedControls");
+  const selChar = document.getElementById("selChar");
+  const sizeSlider = document.getElementById("sizeSlider");
+  const sizeVal = document.getElementById("sizeVal");
+  const rotSlider = document.getElementById("rotSlider");
+  const rotVal = document.getElementById("rotVal");
+  const multiControls = document.getElementById("multiControls");
+  const multiCount = document.getElementById("multiCount");
+
+  function getSelectedGlyph() {
+    if (selectedIds.size !== 1) return null;
+    const id = Array.from(selectedIds)[0];
+    return glyphs.find(x => x.id === id) || null;
+  }
+
+  function updateSelectedPanel() {
+    if (selectedIds.size === 0) {
+      selectedControls.classList.remove("show");
+      multiControls.classList.remove("show");
+      return;
+    }
+    if (selectedIds.size === 1) {
+      multiControls.classList.remove("show");
+      const g = getSelectedGlyph();
+      if (!g) { selectedControls.classList.remove("show"); return; }
+      selectedControls.classList.add("show");
+      selChar.textContent = g.ch;
+      sizeSlider.value = Math.round(g.size);
+      sizeVal.textContent = Math.round(g.size);
+      rotSlider.value = g.rot;
+      rotVal.textContent = g.rot + "°";
+      return;
+    }
+    // 複数選択
+    selectedControls.classList.remove("show");
+    multiControls.classList.add("show");
+    multiCount.textContent = selectedIds.size;
+  }
+
+  function syncSliderFromGlyph(g) {
+    if (!selectedIds.has(g.id) || selectedIds.size !== 1) return;
+    sizeSlider.value = Math.round(g.size);
+    sizeVal.textContent = Math.round(g.size);
+    rotSlider.value = ((g.rot % 360) + 540) % 360 - 180;
+    rotVal.textContent = rotSlider.value + "°";
+  }
+
+  sizeSlider.addEventListener("input", () => {
+    const g = getSelectedGlyph();
+    if (!g) return;
+    g.size = parseFloat(sizeSlider.value);
+    sizeVal.textContent = Math.round(g.size);
+    layoutGlyphEl(g);
+    positionHandles(g);
+  });
+
+  rotSlider.addEventListener("input", () => {
+    const g = getSelectedGlyph();
+    if (!g) return;
+    g.rot = parseFloat(rotSlider.value);
+    rotVal.textContent = g.rot + "°";
+    layoutGlyphEl(g);
+    positionHandles(g);
+  });
+
+  document.getElementById("orientToggleBtn").addEventListener("click", () => {
+    const g = getSelectedGlyph();
+    if (!g) return;
+    g.vertical = !g.vertical;
+    layoutGlyphEl(g);
+    positionHandles(g);
+  });
+
+  document.getElementById("frontBtn").addEventListener("click", () => {
+    const g = getSelectedGlyph();
+    if (!g) return;
+    g.z = nextZ++;
+    document.getElementById("g-" + g.id).style.zIndex = g.z;
+  });
+
+  document.getElementById("resetCharBtn").addEventListener("click", () => {
+    const g = getSelectedGlyph();
+    if (!g) return;
+    const idx = glyphs.indexOf(g);
+    const fontSize = Math.min(110, (STAGE_W * 0.82) / glyphs.length);
+    g.size = fontSize;
+    g.rot = 0;
+    g.vertical = false;
+    layoutGlyphEl(g);
+    positionHandles(g);
+    syncSliderFromGlyph(g);
+  });
+
+  // ---------- 全体操作 ----------
+  document.getElementById("autoArrangeBtn").addEventListener("click", () => {
+    const fontSize = Math.min(110, (STAGE_W * 0.82) / Math.max(1, glyphs.length));
+    const totalWidth = glyphs.length * fontSize * 0.92;
+    let startX = (STAGE_W - totalWidth) / 2;
+    const baseY = STAGE_H / 2;
+    glyphs.forEach((g, i) => {
+      g.x = startX + i * fontSize * 0.92 + fontSize * 0.46;
+      g.y = baseY;
+      g.size = fontSize;
+      g.rot = 0;
+      g.vertical = false;
+      layoutGlyphEl(g);
+    });
+    const g = getSelectedGlyph();
+    if (g) {
+      positionHandles(g);
+      syncSliderFromGlyph(g);
+    }
+  });
+
+  document.getElementById("shuffleBtn").addEventListener("click", () => {
+    glyphs.forEach(g => {
+      g.x = STAGE_W * 0.18 + Math.random() * STAGE_W * 0.64;
+      g.y = STAGE_H * 0.2 + Math.random() * STAGE_H * 0.6;
+      g.rot = (Math.random() - 0.5) * 50;
+      layoutGlyphEl(g);
+    });
+    const g = getSelectedGlyph();
+    if (g) {
+      positionHandles(g);
+      syncSliderFromGlyph(g);
+    }
+  });
+
+  // ---------- 複数選択：一括操作 ----------
+  document.getElementById("multiVerticalBtn").addEventListener("click", () => {
+    glyphs.filter(g => selectedIds.has(g.id)).forEach(g => {
+      g.vertical = true;
+      layoutGlyphEl(g);
+    });
+  });
+
+  document.getElementById("multiHorizontalBtn").addEventListener("click", () => {
+    glyphs.filter(g => selectedIds.has(g.id)).forEach(g => {
+      g.vertical = false;
+      layoutGlyphEl(g);
+    });
+  });
+
+  document.getElementById("multiSameSizeBtn").addEventListener("click", () => {
+    const selected = glyphs.filter(g => selectedIds.has(g.id));
+    if (!selected.length) return;
+    // 選択中の文字の平均サイズに揃える
+    const avg = selected.reduce((sum, g) => sum + g.size, 0) / selected.length;
+    selected.forEach(g => {
+      g.size = avg;
+      layoutGlyphEl(g);
+    });
+  });
+
+  document.getElementById("multiEvenGapBtn").addEventListener("click", () => {
+    const selected = glyphs.filter(g => selectedIds.has(g.id));
+    if (selected.length < 2) return;
+
+    // 配置の主軸（横方向か縦方向か）を、選択範囲の広がりから判定する
+    const xs = selected.map(g => g.x);
+    const ys = selected.map(g => g.y);
+    const xRange = Math.max(...xs) - Math.min(...xs);
+    const yRange = Math.max(...ys) - Math.min(...ys);
+    const horizontal = xRange >= yRange;
+
+    // 並び順を主軸の座標でソートし、両端を保ったまま等間隔に再配置する
+    const sorted = [...selected].sort((a, b) => horizontal ? a.x - b.x : a.y - b.y);
+    const first = sorted[0], last = sorted[sorted.length - 1];
+
+    if (horizontal) {
+      const startX = first.x, endX = last.x;
+      const fixedY = first.y; // 横方向に整列する場合、Y座標も揃える
+      sorted.forEach((g, i) => {
+        const t = i / (sorted.length - 1);
+        g.x = startX + (endX - startX) * t;
+        g.y = fixedY;
+        layoutGlyphEl(g);
+      });
+    } else {
+      const startY = first.y, endY = last.y;
+      const fixedX = first.x;
+      sorted.forEach((g, i) => {
+        const t = i / (sorted.length - 1);
+        g.y = startY + (endY - startY) * t;
+        g.x = fixedX;
+        layoutGlyphEl(g);
+      });
+    }
+  });
+
+  document.getElementById("multiClearBtn").addEventListener("click", () => {
+    clearAllSelection();
+  });
+
+  // ---------- テキスト変更 ----------
+  let debounceTimer = null;
+  textInput.addEventListener("input", () => {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      buildGlyphsFromText(textInput.value);
+    }, 250);
+  });
+
+  // ---------- リサイズ対応：scale再適用＋ハンドル位置追従 ----------
+  window.addEventListener("resize", () => {
+    applyStageScale();
+    const g = getSelectedGlyph();
+    if (g) positionHandles(g);
+  });
+
+  // ---------- PNG書き出し（DOM→Canvas簡易レンダリング） ----------
+  document.getElementById("downloadBtn").addEventListener("click", () => {
+    exportToPng();
+  });
+
+  function exportToPng() {
+    const canvas = document.createElement("canvas");
+    canvas.width = STAGE_W;
+    canvas.height = STAGE_H;
+    const ctx = canvas.getContext("2d");
+    const pal = PALETTES[currentPalette];
+
+    ctx.fillStyle = pal.bg;
+    ctx.fillRect(0, 0, STAGE_W, STAGE_H);
+
+    // zIndex順に描画
+    const sorted = [...glyphs].sort((a, b) => a.z - b.z);
+    sorted.forEach(g => {
+      ctx.save();
+      ctx.translate(g.x, g.y);
+      ctx.rotate(g.rot * Math.PI / 180);
+      ctx.fillStyle = pal.fg;
+      ctx.font = `700 ${g.size}px 'Shippori Mincho', serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      // 縦書きの場合は簡易的に文字を90度回転させずそのまま中央配置（1文字なので見た目は同じ）
+      ctx.fillText(g.ch, 0, g.size * 0.05);
+      ctx.restore();
+    });
+
+    const link = document.createElement("a");
+    link.download = "eyecatch.png";
+    link.href = canvas.toDataURL("image/png");
+    link.click();
+  }
+
+  // ---------- 初期化 ----------
+  applyStageScale();
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(() => buildGlyphsFromText(textInput.value));
+  } else {
+    buildGlyphsFromText(textInput.value);
+  }
+})();
+</script>
+
+</body>
+</html>
