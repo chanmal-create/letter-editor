@@ -74,19 +74,21 @@
     -webkit-user-select: none;
   }
   .glyph.selected {
-    outline: 1.5px dashed rgba(138,46,46,0.7);
+    outline: 2px dashed rgba(196,60,60,0.9);
     outline-offset: 6px;
+    box-shadow: 0 0 0 9999px rgba(196,60,60,0.04) inset;
   }
   .glyph.multi-selected {
-    outline: 1.5px dashed rgba(60,82,70,0.8);
+    outline: 2.5px dashed #3CD68A;
     outline-offset: 6px;
+    box-shadow: 0 0 0 2px rgba(0,0,0,0.25);
   }
   .glyph:active { cursor: grabbing; }
 
   .selection-box {
     position: absolute;
-    border: 1px dashed rgba(138,46,46,0.85);
-    background: rgba(138,46,46,0.08);
+    border: 1.5px dashed rgba(196,60,60,0.9);
+    background: rgba(196,60,60,0.12);
     pointer-events: none;
     z-index: 80;
     display: none;
@@ -272,7 +274,7 @@
 
       <div class="field">
         <label>文字を入力（変更すると配置はリセットされます）</label>
-        <textarea id="textInput" maxlength="30">言葉を、デザインする。</textarea>
+        <textarea id="textInput" maxlength="80">言葉を、デザインする。</textarea>
       </div>
 
       <div class="multi-controls" id="multiControls">
@@ -447,6 +449,28 @@
   }
 
   // ---------- 文字の初期化 ----------
+  // 文字数に応じて折り返し行数・フォントサイズ・各文字の座標を計算する共通ロジック。
+  // 新規テキスト入力時と「自動で並べ直す」ボタンの両方で使う。
+  // 1行の文字数に上限（MAX_CHARS_PER_LINE）を設け、それを超える文字数なら必ず複数行に折り返す。
+  function computeWrappedLayout(count) {
+    const MAX_FONT_SIZE = 110;
+    const MIN_FONT_SIZE = 28;
+    const MAX_CHARS_PER_LINE = 20;
+
+    const lineCount = Math.max(1, Math.ceil(count / MAX_CHARS_PER_LINE));
+    const charsPerLine = Math.ceil(count / lineCount);
+
+    const sizeByWidth = (STAGE_W * 0.86) / (charsPerLine * 0.92);
+    const sizeByHeight = (STAGE_H * 0.8) / lineCount;
+    const fontSize = Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, sizeByWidth, sizeByHeight));
+
+    const lineHeight = fontSize * 1.1;
+    const totalBlockHeight = lineCount * lineHeight;
+    const startY = (STAGE_H - totalBlockHeight) / 2 + lineHeight / 2;
+
+    return { fontSize, lineCount, charsPerLine, lineHeight, startY };
+  }
+
   function buildGlyphsFromText(text) {
     stage.querySelectorAll(".glyph").forEach(el => el.remove());
     clearHandles();
@@ -457,25 +481,32 @@
     const chars = Array.from(text);
     if (!chars.length) return;
 
-    const fontSize = Math.min(110, (STAGE_W * 0.82) / chars.length);
-    const totalWidth = chars.length * fontSize * 0.92;
-    let startX = (STAGE_W - totalWidth) / 2;
-    const baseY = STAGE_H / 2;
+    const { fontSize, lineCount, charsPerLine, lineHeight, startY } = computeWrappedLayout(chars.length);
 
-    chars.forEach((ch, i) => {
-      const g = {
-        id: nextId++,
-        ch,
-        x: startX + i * fontSize * 0.92 + fontSize * 0.46,
-        y: baseY,
-        size: fontSize,
-        rot: 0,
-        vertical: false,
-        z: nextZ++
-      };
-      glyphs.push(g);
-      createGlyphEl(g);
-    });
+    for (let lineIdx = 0; lineIdx < lineCount; lineIdx++) {
+      const lineChars = chars.slice(lineIdx * charsPerLine, (lineIdx + 1) * charsPerLine);
+      if (!lineChars.length) continue;
+
+      const totalWidth = lineChars.length * fontSize * 0.92;
+      const startX = (STAGE_W - totalWidth) / 2;
+      const y = startY + lineIdx * lineHeight;
+
+      lineChars.forEach((ch, i) => {
+        const g = {
+          id: nextId++,
+          ch,
+          x: startX + i * fontSize * 0.92 + fontSize * 0.46,
+          y: y,
+          size: fontSize,
+          rot: 0,
+          vertical: false,
+          z: nextZ++
+        };
+        glyphs.push(g);
+        createGlyphEl(g);
+      });
+    }
+
     applyPalette();
     applyFont();
   }
@@ -915,18 +946,26 @@
 
   // ---------- 全体操作 ----------
   document.getElementById("autoArrangeBtn").addEventListener("click", () => {
-    const fontSize = Math.min(110, (STAGE_W * 0.82) / Math.max(1, glyphs.length));
-    const totalWidth = glyphs.length * fontSize * 0.92;
-    let startX = (STAGE_W - totalWidth) / 2;
-    const baseY = STAGE_H / 2;
-    glyphs.forEach((g, i) => {
-      g.x = startX + i * fontSize * 0.92 + fontSize * 0.46;
-      g.y = baseY;
-      g.size = fontSize;
-      g.rot = 0;
-      g.vertical = false;
-      layoutGlyphEl(g);
-    });
+    const { fontSize, lineCount, charsPerLine, lineHeight, startY } = computeWrappedLayout(glyphs.length);
+
+    for (let lineIdx = 0; lineIdx < lineCount; lineIdx++) {
+      const lineGlyphs = glyphs.slice(lineIdx * charsPerLine, (lineIdx + 1) * charsPerLine);
+      if (!lineGlyphs.length) continue;
+
+      const totalWidth = lineGlyphs.length * fontSize * 0.92;
+      const startX = (STAGE_W - totalWidth) / 2;
+      const y = startY + lineIdx * lineHeight;
+
+      lineGlyphs.forEach((g, i) => {
+        g.x = startX + i * fontSize * 0.92 + fontSize * 0.46;
+        g.y = y;
+        g.size = fontSize;
+        g.rot = 0;
+        g.vertical = false;
+        layoutGlyphEl(g);
+      });
+    }
+
     const g = getSelectedGlyph();
     if (g) {
       positionHandles(g);
